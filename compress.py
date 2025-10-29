@@ -428,54 +428,144 @@ class H265Compressor:
             self.config = saved_config
 
     def find_optimal_crf(self, input_video: str) -> Tuple[int, Optional[str], float, float]:
-        """Find CRF that achieves both VMAF ≥95 and compression ≥10x"""
-        opt_params = self.config.get("optimization_params", {})
-        crf_min = opt_params.get("crf_min", 14)
-        crf_max = opt_params.get("crf_max", 35)
-        vmaf_threshold = opt_params.get("vmaf_threshold", 95)
-        compression_threshold = opt_params.get("compression_ratio_target", 10)
+       def find_optimal_crf(self, input_video: str) -> Tuple[int, Optional[str], float, float]:
+    """Find CRF with best balance of VMAF and compression using smart scoring"""
+    opt_params = self.config.get("optimization_params", {})
+    crf_min = opt_params.get("crf_min", 14)
+    crf_max = opt_params.get("crf_max", 35)
+    vmaf_threshold = opt_params.get("vmaf_threshold", 95)
+    compression_threshold = opt_params.get("compression_ratio_target", 10)
 
-        print(f"[SEARCH] Looking for VMAF ≥{vmaf_threshold} and compression ≥{compression_threshold}x")
-        print(f"[SEARCH] CRF range: {crf_min} to {crf_max}")
+    print(f"[SEARCH] Looking for VMAF ≥{vmaf_threshold} and compression ≥{compression_threshold}x")
+    print(f"[SEARCH] CRF range: {crf_min} to {crf_max}")
+    print(f"[SEARCH] Using smart scoring: prioritizes VMAF ≥95, then maximizes compression\n")
 
-        best_vmaf = -1.0
-        best_compression = 0.0
-        best_crf = crf_min
-        best_file = None
+    best_score = -float('inf')
+    best_vmaf = -1.0
+    best_compression = 0.0
+    best_crf = crf_min
+    best_file = None
+    
+    results = []  # Store all results for analysis
 
-        # Search from lowest CRF (highest quality) upward
-        for crf in range(crf_min, crf_max + 1):
-            output_file, vmaf_score, compression_ratio = self._encode_with_crf(input_video, crf)
-            
-            if not output_file:
-                continue
+    # Search through all CRFs
+    for crf in range(crf_min, crf_max + 1):
+        output_file, vmaf_score, compression_ratio = self._encode_with_crf(input_video, crf)
+        
+        if not output_file:
+            continue
 
-            # Track best overall result
-            if vmaf_score > best_vmaf or (vmaf_score == best_vmaf and compression_ratio > best_compression):
-                # Clean up previous best file if it exists
-                if best_file and best_file != output_file and os.path.exists(best_file):
-                    try:
-                        os.unlink(best_file)
-                    except:
-                        pass
-                best_vmaf = vmaf_score
-                best_compression = compression_ratio
-                best_crf = crf
-                best_file = output_file
-            else:
-                # Clean up this file since it's not the best
+        # ============================================
+        # SMART SCORING FORMULA
+        # ============================================
+        # Goals:
+        # 1. Strongly prefer VMAF ≥ 95
+        # 2. Among VMAF ≥ 95, maximize compression
+        # 3. If VMAF < 95, still consider but with heavy penalty
+        
+        # Component 1: VMAF Score (exponential reward above 95)
+        if vmaf_score >= vmaf_threshold:
+            vmaf_component = 100 + (vmaf_score - vmaf_threshold) * 2  # Bonus for exceeding target
+        else:
+            # Heavy penalty for being below threshold
+            deficit = vmaf_threshold - vmaf_score
+            vmaf_component = 100 * math.exp(-0.5 * deficit)  # Exponential decay
+        
+        # Component 2: Compression Score (logarithmic to avoid over-compression)
+        if compression_ratio >= compression_threshold:
+            # Bonus for meeting target, diminishing returns after
+            compression_component = 50 + 10 * math.log10(compression_ratio / compression_threshold + 1)
+        else:
+            # Linear penalty below target
+            compression_component = 50 * (compression_ratio / compression_threshold)
+        
+        # Component 3: Balance penalty (penalize extreme imbalances)
+        vmaf_normalized = vmaf_score / 100.0
+        compression_normalized = min(compression_ratio / compression_threshold, 2.0) / 2.0
+        balance_penalty = -20 * abs(vmaf_normalized - compression_normalized)
+        
+        # Final score: weighted combination
+        score = (
+            0.65 * vmaf_component +      # 65% weight on VMAF
+            0.30 * compression_component + # 30% weight on compression  
+            0.05 * balance_penalty        # 5% weight on balance
+        )
+        
+        results.append({
+            'crf': crf,
+            'vmaf': vmaf_score,
+            'compression': compression_ratio,
+            'score': score,
+            'file': output_file
+        })
+        
+        print(f"[SCORE] CRF={crf}: VMAF={vmaf_score:.2f}, Compression={compression_ratio:.2f}x, Score={score:.2f}")
+        
+        # Track best score
+        if score > best_score:
+            # Clean up previous best file
+            if best_file and best_file != output_file and os.path.exists(best_file):
                 try:
-                    os.unlink(output_file)
+                    os.unlink(best_file)
                 except:
                     pass
+            
+            best_score = score
+            best_vmaf = vmaf_score
+            best_compression = compression_ratio
+            best_crf = crf
+            best_file = output_file
+        else:
+            # Clean up this file since it's not the best
+            try:
+                if output_file != best_file:
+                    os.unlink(output_file)
+            except:
+                pass
+        
+        # Early stopping: if we have excellent results and score is declining
+        if len(results) >= 5:
+            recent_scores = [r['score'] for r in results[-3:]]
+            if all(recent_scores[i] > recent_scores[i+1] for i in range(len(recent_scores)-1)):
+                # Scores declining for 3 consecutive CRFs
+                if best_vmaf >= vmaf_threshold and best_compression >= compression_threshold * 0.8:
+                    print(f"\n[EARLY STOP] Scores declining and good results achieved. Stopping search.")
+                    break
 
-            # Check if we've met both targets
-            if vmaf_score >= vmaf_threshold and compression_ratio >= compression_threshold:
-                print(f"[SUCCESS] Found target: CRF={crf}, VMAF={vmaf_score:.2f}, Compression={compression_ratio:.2f}x")
-                return crf, output_file, vmaf_score, compression_ratio
+    # Print summary table
+    print("\n" + "="*80)
+    print("RESULTS SUMMARY:")
+    print("="*80)
+    print(f"{'CRF':<6} {'VMAF':<8} {'Compression':<13} {'Score':<10} {'Status':<20}")
+    print("-"*80)
+    
+    for r in results:
+        vmaf_ok = "✓" if r['vmaf'] >= vmaf_threshold else "✗"
+        comp_ok = "✓" if r['compression'] >= compression_threshold else "✗"
+        status = f"VMAF:{vmaf_ok} COMP:{comp_ok}"
+        if r['crf'] == best_crf:
+            status += " ← SELECTED"
+        print(f"{r['crf']:<6} {r['vmaf']:<8.2f} {r['compression']:<13.2f} {r['score']:<10.2f} {status}")
+    
+    print("="*80)
+    
+    # Final verdict
+    meets_vmaf = best_vmaf >= vmaf_threshold
+    meets_compression = best_compression >= compression_threshold
+    
+    if meets_vmaf and meets_compression:
+        print(f"[SUCCESS] ✓ Both targets met!")
+    elif meets_vmaf:
+        print(f"[PARTIAL] ✓ VMAF target met, but compression {best_compression:.2f}x < {compression_threshold}x")
+    elif meets_compression:
+        print(f"[PARTIAL] ✓ Compression target met, but VMAF {best_vmaf:.2f} < {vmaf_threshold}")
+    else:
+        print(f"[WARNING] Neither target fully met. Best compromise selected.")
+    
+    print(f"[BEST] CRF={best_crf}, VMAF={best_vmaf:.2f}, Compression={best_compression:.2f}x, Score={best_score:.2f}\n")
+    
+    return best_crf, best_file, best_vmaf, best_compression
 
-        print(f"[WARNING] No CRF met both thresholds. Best result: CRF={best_crf}, VMAF={best_vmaf:.2f}, Compression={best_compression:.2f}x")
-        return best_crf, best_file, best_vmaf, best_compression
 
     def compress(self, input_video: str, output_video: str) -> bool:
         """Main compression function"""
