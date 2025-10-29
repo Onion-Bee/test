@@ -1,0 +1,72 @@
+{
+  "algorithm_name": "H.265 High Efficiency Codec",
+  "algorithm_type": "traditional_codec",
+  "description": "HEVC tuned for ≥95 VMAF and ≥10x compression on MP4",
+  "author": "Compression Algorithm Team",
+  "version": "2.2.0",
+  "codec_info": {
+    "codec_name": "libx265",
+    "codec_family": "HEVC",
+    "standard": "ITU-T H.265",
+    "year": 2013,
+    "license": "GPL"
+  },
+  "parameters": {
+    "preset": "veryslow",
+    "crf": 18,
+    "profile": "main",
+    "level": "4.1",
+    "tune": "none",
+    "threads": 0,
+    "tile_columns": 2,
+    "tile_rows": 1
+  },
+  "audio": {
+    "codec": "aac",
+    "bitrate": "128k",
+    "sample_rate": 44100,
+    "channels": 2
+  },
+  "optimization_params": {
+    "vmaf_threshold": 95,
+    "compression_ratio_target": 10,
+    "w_c": 0.7,
+    "w_vmaf": 0.3,
+    "crf_min": 14,
+    "crf_max": 35,
+    "crf_step": 1
+  },
+  "quality_settings": {
+    "ultra_high_quality": {
+      "preset": "veryslow",
+      "crf": 16,
+      "description": "Archival quality, maximal retention"
+    },
+    "high_quality": {
+      "preset": "slow",
+      "crf": 18,
+      "description": "High quality, slower encoding"
+    },
+    "balanced": {
+      "preset": "medium",
+      "crf": 22,
+      "description": "Good balance of quality and speed"
+    }
+  },
+  "supported_formats": ["mp4"],
+  "output_format": "mp4",
+  "expected_compression_ratio": 10,
+  "quality_target": "ultra_high_quality",
+  "encoding_complexity": "high",
+  "hardware_acceleration": {
+    "nvidia": "hevc_nvenc",
+    "intel": "hevc_qsv",
+    "amd": "hevc_amf"
+  },
+  "optimization_notes": [
+    "CRF 14-22 recommended for VMAF ≥95",
+    "Use 'veryslow' preset for maximum quality",
+    "Tile settings improve parallelism for UHD",
+    "Disable fastdec and strong-intra-smoothing for archival"
+  ]
+}
