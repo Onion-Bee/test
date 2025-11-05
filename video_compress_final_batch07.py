@@ -18,9 +18,9 @@ from typing import List, Tuple, Dict, Optional
 # ----------------------------
 # Config / Paths
 # ----------------------------
-INPUT_DIR   = "video_5s"
-EXCEL_PATH  = "video_5s_results_seq.xlsx"
-CSV_FALLBACK_PATH = "video_5s_results_seq.csv"
+INPUT_DIR   = "/home/indranil/video_process/video_10s"
+EXCEL_PATH  = "/home/indranil/video_process/video_10s_results_new.xlsx"
+CSV_FALLBACK_PATH = "/home/indranil/video_process/video_10s_results_new.csv"
 
 FFMPEG_THREADS = "1"
 VMAF_SUBSAMPLE = 5
